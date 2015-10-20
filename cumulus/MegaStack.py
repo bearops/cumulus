@@ -3,14 +3,19 @@ Megastack module represents a logical mega stack that contains CloudFormation
 stacks and the relationship between them
 """
 import boto
+import time
 import logging
 import simplejson
 import time
 import yaml
 import pystache
+import threading
 import os
 from cumulus.CFStack import CFStack
 from boto import cloudformation, iam
+
+
+finished = []
 
 
 class MegaStack(object):
@@ -18,6 +23,7 @@ class MegaStack(object):
     Main worker class for cumulus. Holds array of CFstack objects and does most
     of the calls to CloudFormation API
     """
+
     def __init__(self, yamlFile):
         self.logger = logging.getLogger(__name__)
 
@@ -186,11 +192,68 @@ class MegaStack(object):
                                     bool(stack.exists_in_cf(
                                          self.cf_desc_stacks))))
 
+    def _create(self, stack):
+        self.logger.info("STARTING %s, depends on %s" % (stack.name, stack.depends_on))
+
+        if stack.depends_on:
+            while not all(map(lambda dep: dep in finished, stack.depends_on)):
+                self.logger.info("SLEEPING %s %s %s" % (stack.name, finished, stack.depends_on))
+                time.sleep(1)
+
+        if stack.deps_met(self.cf_desc_stacks) is False:
+            self.logger.critical("Dependancies for stack %s not met"
+                                 " and they should be, exiting..."
+                                 % stack.name)
+            exit(1)
+        if not stack.populate_params(self.cf_desc_stacks):
+            self.logger.critical("Could not determine correct "
+                                 "parameters for stack %s"
+                                 % stack.name)
+            exit(1)
+
+        stack.read_template()
+        self.logger.info("Creating: %s, %s" % (
+            stack.cf_stack_name, stack.get_params_tuples()))
+        try:
+            self.cfconn.create_stack(
+                stack_name=stack.cf_stack_name,
+                template_body=stack.template_body,
+                parameters=stack.get_params_tuples(),
+                capabilities=['CAPABILITY_IAM'],
+                notification_arns=stack.sns_topic_arn,
+                tags=stack.tags
+            )
+        except Exception as exception:
+            self.logger.critical(
+                "Creating stack %s failed. Error: %s" % (
+                    stack.cf_stack_name, exception))
+            exit(1)
+
+        create_result = self.watch_events(
+            stack.cf_stack_name, "CREATE_IN_PROGRESS")
+        if create_result != "CREATE_COMPLETE":
+            self.logger.critical(
+                "Stack didn't create correctly, status is now %s"
+                % create_result)
+            exit(1)
+
+        # CF told us stack completed ok.
+        # Log message to that effect and refresh the list of stack
+        # objects in CF
+        self.logger.info("Finished creating stack: %s"
+                         % stack.cf_stack_name)
+        self.cf_desc_stacks = self._describe_all_stacks()
+
+        finished.append("%s-%s" % (self.name, stack.name))
+
     def create(self, stack_name=None):
         """
         Create all stacks in the yaml file.
         Any that already exist are skipped (no attempt to update)
         """
+
+        queue = []
+
         for stack in self.stack_objs:
             if stack_name and stack.name != stack_name:
                 continue
@@ -199,50 +262,20 @@ class MegaStack(object):
             if stack.exists_in_cf(self.cf_desc_stacks):
                 self.logger.info("Stack %s already exists in CloudFormation,"
                                  " skipping" % stack.name)
+                finished.append("%s-%s" % (self.name, stack.name))
             else:
-                if stack.deps_met(self.cf_desc_stacks) is False:
-                    self.logger.critical("Dependancies for stack %s not met"
-                                         " and they should be, exiting..."
-                                         % stack.name)
-                    exit(1)
-                if not stack.populate_params(self.cf_desc_stacks):
-                    self.logger.critical("Could not determine correct "
-                                         "parameters for stack %s"
-                                         % stack.name)
-                    exit(1)
+                queue.append(stack)
 
-                stack.read_template()
-                self.logger.info("Creating: %s, %s" % (
-                    stack.cf_stack_name, stack.get_params_tuples()))
-                try:
-                    self.cfconn.create_stack(
-                        stack_name=stack.cf_stack_name,
-                        template_body=stack.template_body,
-                        parameters=stack.get_params_tuples(),
-                        capabilities=['CAPABILITY_IAM'],
-                        notification_arns=stack.sns_topic_arn,
-                        tags=stack.tags
-                    )
-                except Exception as exception:
-                    self.logger.critical(
-                        "Creating stack %s failed. Error: %s" % (
-                            stack.cf_stack_name, exception))
-                    exit(1)
+        threads = [threading.Thread(target=self._create, args=(stack,))
+                   for stack in queue]
 
-                create_result = self.watch_events(
-                    stack.cf_stack_name, "CREATE_IN_PROGRESS")
-                if create_result != "CREATE_COMPLETE":
-                    self.logger.critical(
-                        "Stack didn't create correctly, status is now %s"
-                        % create_result)
-                    exit(1)
+        for thread in threads:
+            thread.start()
 
-                # CF told us stack completed ok.
-                # Log message to that effect and refresh the list of stack
-                # objects in CF
-                self.logger.info("Finished creating stack: %s"
-                                 % stack.cf_stack_name)
-                self.cf_desc_stacks = self._describe_all_stacks()
+        for thread in threads:
+            thread.join()
+
+        self.logger.info("FINISHED ALL")
 
     def delete(self, stack_name=None):
         """
@@ -524,3 +557,4 @@ class MegaStack(object):
             resp = self.cfconn.describe_stacks(next_token=resp.next_token)
             result.extend(resp)
         return result
+
