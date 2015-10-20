@@ -571,4 +571,3 @@ class MegaStack(object):
             resp = self.cfconn.describe_stacks(next_token=resp.next_token)
             result.extend(resp)
         return result
-
