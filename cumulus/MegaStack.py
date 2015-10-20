@@ -18,6 +18,17 @@ from boto import cloudformation, iam
 finished = []
 
 
+def retry_on_rate_limit(func, args):
+    sleep_time = 1.0
+
+    while True:
+        try:
+            return func(*args)
+        except boto.BotoServerError:
+            time.sleep(sleep_time)
+            sleep_time += 0.5
+
+
 class MegaStack(object):
     """
     Main worker class for cumulus. Holds array of CFstack objects and does most
@@ -193,11 +204,15 @@ class MegaStack(object):
                                          self.cf_desc_stacks))))
 
     def _create(self, stack):
-        self.logger.info("STARTING %s, depends on %s" % (stack.name, stack.depends_on))
+        self.logger.info("STARTING %s" % stack.name)
+
+        sleep_message = True
 
         if stack.depends_on:
             while not all(map(lambda dep: dep in finished, stack.depends_on)):
-                self.logger.info("SLEEPING %s %s %s" % (stack.name, finished, stack.depends_on))
+                if sleep_message:
+                    self.logger.info("SLEEPING %s" % stack.name)
+                    sleep_message = False
                 time.sleep(1)
 
         if stack.deps_met(self.cf_desc_stacks) is False:
@@ -541,7 +556,7 @@ class MegaStack(object):
                     ))
             if count > 0:
                 events = new_events[:]
-            cfstack_obj.update()
+            retry_on_rate_limit(func=cfstack_obj.update, args=())
             status = str(cfstack_obj.stack_status)
             time.sleep(5)
         return status
