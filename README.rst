@@ -26,12 +26,12 @@ News
 
 -  You can now insert PyStache {{}} style variables to import
    environment variables.
-   
+
    ::
-   
+
       stack:
         ami_id: {{AMIID}}
-      
+
       AMID=ami-1q23123123 cumulus -y example_stack.yaml -a create
 
     would be seen by cloudformation with the ami id of ami-1q23123123
@@ -44,7 +44,7 @@ News
 
 ::
 
-        tags:       
+        tags:
           tag1: value
           tag2: value
 
@@ -206,5 +206,5 @@ All sections are required at the moment, even if they are blank (i.e.
 depends, params). depends also needs to be empty or an array, even if
 the stack has only one dependency.
 
-.. |Circle CI| image:: https://circleci.com/gh/cotdsa/cumulus/tree/master.svg?style=svg
-   :target: https://circleci.com/gh/cotdsa/cumulus/tree/master
+.. |Circle CI| image:: https://circleci.com/gh/bearops/cumulus/tree/master.svg?style=svg
+   :target: https://circleci.com/gh/bearops/cumulus/tree/master
