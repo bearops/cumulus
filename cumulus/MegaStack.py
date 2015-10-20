@@ -6,7 +6,6 @@ import boto
 import time
 import logging
 import simplejson
-import time
 import yaml
 import pystache
 import threading
