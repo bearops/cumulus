@@ -205,14 +205,11 @@ class MegaStack(object):
     def _create(self, stack):
         self.logger.info("STARTING %s" % stack.name)
 
-        sleep_message = True
-
         if stack.depends_on:
             while not all(map(lambda dep: dep in finished, stack.depends_on)):
-                if sleep_message:
-                    self.logger.info("SLEEPING %s" % stack.name)
-                    sleep_message = False
                 time.sleep(1)
+
+            self.logger.info("WAKE UP  %s" % stack.name)
 
         if stack.deps_met(self.cf_desc_stacks) is False:
             self.logger.critical("Dependancies for stack %s not met"
@@ -258,7 +255,7 @@ class MegaStack(object):
                          % stack.cf_stack_name)
         self.cf_desc_stacks = self._describe_all_stacks()
 
-        finished.append("%s-%s" % (self.name, stack.name))
+        finished.append(stack.cf_stack_name)
 
     def create(self, stack_name=None):
         """
@@ -276,7 +273,7 @@ class MegaStack(object):
             if stack.exists_in_cf(self.cf_desc_stacks):
                 self.logger.info("Stack %s already exists in CloudFormation,"
                                  " skipping" % stack.name)
-                finished.append("%s-%s" % (self.name, stack.name))
+                finished.append(stack.cf_stack_name)
             else:
                 queue.append(stack)
 
